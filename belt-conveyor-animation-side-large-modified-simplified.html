@@ -1,0 +1,2417 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ベルトコンベアアニメーション（横視点）- 簡略版</title>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // 各セットを独立して実行するコンポーネント
+        const SetRunner = ({ id, onStage8Start, onComplete, showRod, shouldHideUpperBar, onStageChange, showGrid, isPaused }) => {
+          const [futobouStage, setFutobouStage] = useState(0); // 太棒の状態: 0=初期位置, 1=64mm下, 2=164mm下
+          const [objectOneStage, setObjectOneStage] = useState(0); // 物体①の状態: 0-8の9段階
+          const [hosobouStage, setHosobouStage] = useState(2); // 細棒の状態: 1=通常色, 2=背景色黄色
+          const [stage1PaperT, setStage1PaperT] = useState(0); // 段階1の台紙移動進行度(0..1)
+          const [stage2ObjectDropT, setStage2ObjectDropT] = useState(0); // 段階2の物体①落下進行度(0..1)
+          const [stage3RodDropT, setStage3RodDropT] = useState(0); // 段階3の棒・台紙落下進行度(0..1)
+          const [stage3Object2DropT, setStage3Object2DropT] = useState(0); // 段階3の物体②落下進行度(0..1)
+          const [stage4PaperMoveT, setStage4PaperMoveT] = useState(0); // 段階4の上台紙移動進行度(0..1)
+          const [stage5TransformT, setStage5TransformT] = useState(0); // 段階5の物体・台紙変形・落下進行度(0..1)
+          const [stage6MoveT, setStage6MoveT] = useState(0); // 段階6の全要素移動進行度(0..1)
+          const [stage7MoveT, setStage7MoveT] = useState(0); // 段階7の物体移動進行度(0..1)
+          const [stage7RodMoveT, setStage7RodMoveT] = useState(0); // 段階7の太棒移動進行度(0..1)
+          const [stage8MoveT, setStage8MoveT] = useState(0); // 段階8の物体移動進行度(0..1)
+          const [showBand, setShowBand] = useState(false); // 帯の表示フラグ
+          const [stage9MoveT, setStage9MoveT] = useState(0); // 段階9の物体移動進行度(0..1)
+          const [stage10WaitT, setStage10WaitT] = useState(0); // 段階10の待機進行度(0..1)
+          const [stage8StartTime, setStage8StartTime] = useState(0); // 段階8開始時刻
+          const stage8NotifiedRef = React.useRef(false);
+          
+            // コの字キャッチャーの状態管理
+          const [cocatchStage, setCocatchStage] = useState(0); // 0=待機, 1=挟み込み中, 2=挟み込み完了, 3=移動中
+          const [cocatchUpperT, setCocatchUpperT] = useState(0); // 上の横棒の昇降進行度(0..1)
+          const [cocatchMoveT, setCocatchMoveT] = useState(0); // キャッチャー移動進行度(0..1)
+          const [cocatchApproachT, setCocatchApproachT] = useState(0); // 段階7での接近アニメーション進行度(0..1)
+          const [cocatchReturnT, setCocatchReturnT] = useState(0); // 段階9完了後の復帰アニメーション進行度(0..1)
+          const [cocatchLiftT, setCocatchLiftT] = useState(0); // キャッチャーの上の横棒の昇降進行度(0..1)
+          const [cocatchLiftStartTime, setCocatchLiftStartTime] = useState(0); // 昇降アニメーション開始時刻
+          const [cocatchRightMoveT, setCocatchRightMoveT] = useState(0); // キャッチャーの右移動進行度(0..1)
+          
+          // ローラーの回転角度
+          const [rollerRotation, setRollerRotation] = useState(0);
+          // ベルトのダッシュオフセット（線のパターン移動用）
+          const [beltDashOffset, setBeltDashOffset] = useState(0);
+          
+          // コの字キャッチャーのアニメーション制御
+          useEffect(() => {
+            let rafId;
+            let rafId2;
+            let timeoutId;
+            
+            // 一時停止中はアニメーションを停止
+            if (isPaused) {
+              return () => {
+                if (rafId) cancelAnimationFrame(rafId);
+                if (rafId2) cancelAnimationFrame(rafId2);
+                if (timeoutId) clearTimeout(timeoutId);
+              };
+            }
+            
+            // 段階6完了後の接近アニメーション（1秒でセットと接触する位置まで移動）
+            // 削除：段階6での1秒接近アニメーションは不要
+            
+            // 段階6完了後、1秒後にキャッチャーの上の横棒を下げる
+            if (objectOneStage === 6 && cocatchLiftStartTime === 0) {
+              setCocatchLiftStartTime(performance.now());
+            }
+            
+            // セットがベルトコンベア上に到達してから1秒後に昇降アニメーション開始
+            if (objectOneStage === 6 && cocatchLiftStartTime > 0) {
+              const elapsed = performance.now() - cocatchLiftStartTime;
+              if (elapsed >= 1000 && cocatchLiftT < 1) {
+                const duration = 100; // 0.1秒で下げる
+                const start = performance.now();
+                setCocatchLiftT(0);
+                const tick = (ts) => {
+                  const t = Math.min(1, (ts - start) / duration);
+                  setCocatchLiftT(t);
+                  if (t < 1) {
+                    rafId = requestAnimationFrame(tick);
+                  }
+                };
+                rafId = requestAnimationFrame(tick);
+              }
+            }
+            
+            // 段階9で上の横棒を元の高さに戻す
+            if (objectOneStage === 9 && cocatchLiftT > 0) {
+              const duration = 100; // 0.1秒で戻す
+              const start = performance.now();
+              const initialLiftT = cocatchLiftT;
+              const tick = (ts) => {
+                const t = Math.min(1, (ts - start) / duration);
+                setCocatchLiftT(initialLiftT * (1 - t));
+                if (t < 1) {
+                  rafId = requestAnimationFrame(tick);
+                }
+              };
+              rafId = requestAnimationFrame(tick);
+            }
+            
+            // 段階9完了後の復帰アニメーション（0.2秒待ってから右に100mm移動、その後ベルトコンベア上に移動）
+            if (objectOneStage === 9 && cocatchReturnT === 0) {
+              // 段階9開始時刻を記録
+              if (cocatchLiftStartTime === 0) {
+                setCocatchLiftStartTime(performance.now());
+              }
+              
+              const elapsed = performance.now() - cocatchLiftStartTime;
+              
+              // 0.2秒待ってから右移動開始
+              if (elapsed >= 200 && cocatchRightMoveT === 0) {
+                const duration = 300; // 0.3秒で右に100mm移動
+                const start = performance.now();
+                setCocatchRightMoveT(0);
+                const tick = (ts) => {
+                  const t = Math.min(1, (ts - start) / duration);
+                  setCocatchRightMoveT(t);
+                  if (t < 1) {
+                    rafId = requestAnimationFrame(tick);
+                  } else {
+                    // 右移動完了後、すぐにベルトコンベア上への移動を開始（キャンセル可能なrAFチェーン）
+                    timeoutId = setTimeout(() => {
+                      const duration2 = 200; // 0.2秒でベルトコンベア上に移動
+                      const start2 = performance.now();
+                      setCocatchReturnT(0);
+                      // 内側のrAFも外側でキャンセルできるように参照保持
+                      const tick2 = (ts) => {
+                        const t2 = Math.min(1, (ts - start2) / duration2);
+                        setCocatchReturnT(t2);
+                        if (t2 < 1) {
+                          rafId2 = requestAnimationFrame(tick2);
+                        }
+                      };
+                      rafId2 = requestAnimationFrame(tick2);
+                    }, 0);
+                    // cleanupはuseEffectのreturnでまとめて実施
+                  }
+                };
+                rafId = requestAnimationFrame(tick);
+              }
+            } else if (objectOneStage > 9 && cocatchReturnT < 1) {
+              // 段階10以降でも復帰アニメーション継続
+              const duration = 200; // 0.2秒
+              const start = performance.now();
+              setCocatchReturnT(0);
+              const tick = (ts) => {
+                const t = Math.min(1, (ts - start) / duration);
+                setCocatchReturnT(t);
+                if (t < 1) {
+                  rafId = requestAnimationFrame(tick);
+                }
+              };
+              rafId = requestAnimationFrame(tick);
+            }
+            
+            // 挟み込み中のアニメーション（0.1秒で上の横棒が下がる）
+            if (cocatchStage === 1) {
+              const duration = 100; // 0.1秒
+              const start = performance.now();
+              setCocatchUpperT(0);
+              const tick = (ts) => {
+                const t = Math.min(1, (ts - start) / duration);
+                setCocatchUpperT(t);
+                if (t < 1) {
+                  rafId = requestAnimationFrame(tick);
+                } else {
+                  // 挟み込み完了
+                  setCocatchStage(2);
+                }
+              };              rafId = requestAnimationFrame(tick);
+            }
+            
+            return () => {
+              if (rafId) cancelAnimationFrame(rafId);
+              if (rafId2) cancelAnimationFrame(rafId2);
+              if (timeoutId) clearTimeout(timeoutId);
+            };
+          }, [cocatchStage, objectOneStage, stage7MoveT, stage9MoveT, isPaused]);
+
+          // 緑ブロックを描画する関数（段階10の下降位置に配置）
+          const renderGreenBlock = () => {
+            const blockWidth = 200;
+            const blockHeight = 30;
+            const largeRadius = 12.5;
+            
+            // 段階10での物体①の位置（下降後）
+            const objX = stack.x + 10 * scale + 840;
+            const futobouStage3OffsetY = 164;
+            const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius + 10; // +10で下降
+            const objY = futobouTopY - paperStrokeWidth / 2;
+            
+            // 下台紙の下面の位置
+            const clearanceY = 1;
+            const paperY = objY + clearanceY; // 台紙の中心線
+            const paperBottomY = paperY + paperStrokeWidth / 2; // 台紙の下面
+            
+            // 緑ブロックの位置（上面を台紙の下面に合わせる、左に25mmずらす）
+            const blockX = objX - 25;
+            const blockY = paperBottomY;
+            
+            return (
+              <rect
+                x={blockX}
+                y={blockY}
+                width={blockWidth}
+                height={blockHeight}
+                fill="#4CAF50"
+                stroke="#388E3C"
+                strokeWidth="2"
+                opacity="0.9"
+              />
+            );
+          };
+
+          // ベルトのパターン移動アニメーション（セットが動いている時だけ）
+          useEffect(() => {
+            let rafId;
+            const moveSpeed = 2; // ピクセル/フレーム
+            // 最新セット以外ではベルトのrAFを停止
+            if (!showRod) {
+              return () => { if (rafId) cancelAnimationFrame(rafId); };
+            }
+            
+            // 一時停止中はアニメーションを停止
+            if (isPaused) {
+              return () => { if (rafId) cancelAnimationFrame(rafId); };
+            }
+            
+            // セットが移動中かどうかを判定
+            const isMoving = 
+              (objectOneStage <= 1) || // 段階1〜2の間は常に回転
+              (objectOneStage === 6 && stage7MoveT < 1) || // 段階7の移動中
+              (objectOneStage === 7 && stage8MoveT < 1) || // 段階8の移動中
+              (objectOneStage === 7 && stage8MoveT >= 1) || // 段階8の待機中（帯掛け中）
+              (objectOneStage === 8 && stage9MoveT < 1);   // 段階9の移動中
+            
+            if (isMoving) {
+              const tick = () => {
+                setBeltDashOffset(prev => (prev - moveSpeed) % 40); // マイナス方向に移動して右方向の動きを表現
+                rafId = requestAnimationFrame(tick);
+              };
+              rafId = requestAnimationFrame(tick);
+            }
+            
+            return () => { if (rafId) cancelAnimationFrame(rafId); };
+          }, [objectOneStage, stage7MoveT, stage8MoveT, stage9MoveT, showRod, isPaused]);
+
+          // 状態変化を親コンポーネントに通知
+          useEffect(() => {
+            if (onStageChange) {
+              onStageChange(id, objectOneStage, cocatchReturnT);
+            }
+          }, [id, objectOneStage, cocatchReturnT, onStageChange]);
+
+          // 物体①の段階変更を監視して太棒と細棒の状態を自動切り替え
+          useEffect(() => {
+            // 一時停止中はアニメーションを停止
+            if (isPaused) {
+              return;
+            }
+
+              // 段階1の台紙移動アニメ（1秒補間）
+            let rafId;
+            if (objectOneStage === 0) {
+                const duration = 1000;
+                const start = performance.now();
+              setStage1PaperT(0);
+                const tick = (ts) => {
+                  const t = Math.min(1, (ts - start) / duration);
+                setStage1PaperT(t);
+                  if (t < 1) {
+                  rafId = requestAnimationFrame(tick);
+                  } else {
+                    // 段階1アニメーション完了したら自動的に段階2へ
+                  setTimeout(() => setObjectOneStage(1), 100);
+                }
+              };
+              rafId = requestAnimationFrame(tick);
+            } else {
+              setStage1PaperT(0);
+              }
+
+              // 段階2の物体①落下アニメ（0.5秒補間）
+            if (objectOneStage === 1) {
+                const duration = 500;
+                const start = performance.now();
+              setStage2ObjectDropT(0);
+                const tick = (ts) => {
+                  const t = Math.min(1, (ts - start) / duration);
+                setStage2ObjectDropT(t);
+                  if (t < 1) {
+                  rafId = requestAnimationFrame(tick);
+                  } else {
+                    // 段階2アニメーション完了したら自動的に段階3へ
+                  setTimeout(() => setObjectOneStage(2), 100);
+                }
+              };
+              rafId = requestAnimationFrame(tick);
+            } else {
+              setStage2ObjectDropT(0);
+            }
+
+            // 段階3のアニメーション（棒・台紙落下→細棒表示→物体②落下）
+            if (objectOneStage === 2) {
+              // まず棒・台紙・物体①の落下アニメ（1秒）
+              if (stage3RodDropT === 0) {
+                const duration = 1000;
+                const start = performance.now();
+                setStage3RodDropT(0.001); // 開始
+                const tick = (ts) => {
+                  const t = Math.min(1, (ts - start) / duration);
+                  setStage3RodDropT(t);
+                  if (t < 1) {
+                    rafId = requestAnimationFrame(tick);
+                  } else {
+                    // 落下完了したら細棒を表示状態に変更
+                    setHosobouStage(1);
+                    
+                    // さらに物体②の落下アニメを開始
+                setTimeout(() => {
+                      const duration2 = 500;
+                      const start2 = performance.now();
+                      setStage3Object2DropT(0);
+                      const tick2 = (ts) => {
+                        const t2 = Math.min(1, (ts - start2) / duration2);
+                        setStage3Object2DropT(t2);
+                        if (t2 < 1) {
+                          rafId = requestAnimationFrame(tick2);
+                        } else {
+                          // 物体②落下完了したら自動的に段階4へ
+                          setTimeout(() => setObjectOneStage(3), 100);
+                        }
+                      };
+                      rafId = requestAnimationFrame(tick2);
+                    }, 200); // 200ms遅延
+                  }
+                };
+                rafId = requestAnimationFrame(tick);
+              }
+            } else {
+              setStage3RodDropT(0);
+              setStage3Object2DropT(0);
+            }
+
+            // 段階4の上台紙移動アニメ（1秒補間）
+            if (objectOneStage === 3) {
+              const duration = 1000;
+                const start = performance.now();
+              setStage4PaperMoveT(0);
+              const tick = (ts) => {
+                const t = Math.min(1, (ts - start) / duration);
+                setStage4PaperMoveT(t);
+                if (t < 1) {
+                  rafId = requestAnimationFrame(tick);
+                } else {
+                  // 段階4アニメーション完了したら自動的に段階5へ（3フレーム分の遅延）
+                  setTimeout(() => setObjectOneStage(4), 50);
+                }
+              };
+              rafId = requestAnimationFrame(tick);
+            } else {
+              setStage4PaperMoveT(0);
+            }
+
+            // 段階5の物体・台紙変形・落下アニメ（0.1秒補間）
+            if (objectOneStage === 4) {
+              const duration = 100;
+              const start = performance.now();
+              setStage5TransformT(0);
+              const tick = (ts) => {
+                const t = Math.min(1, (ts - start) / duration);
+                setStage5TransformT(t);
+                if (t < 1) {
+                  rafId = requestAnimationFrame(tick);
+                } else {
+                  // 段階5アニメーション完了したら自動的に段階6へ
+                  setTimeout(() => setObjectOneStage(5), 100);
+                }
+              };
+              rafId = requestAnimationFrame(tick);
+            } else {
+              setStage5TransformT(0);
+            }
+
+            // 段階6の全要素移動アニメ（2秒補間）
+            if (objectOneStage === 5) {
+              const duration = 2000;
+              const start = performance.now();
+              setStage6MoveT(0);
+              const tick = (ts) => {
+                const t = Math.min(1, (ts - start) / duration);
+                setStage6MoveT(t);
+                if (t < 1) {
+                  rafId = requestAnimationFrame(tick);
+                } else {
+                  // 段階6アニメーション完了したら自動的に段階7へ
+                  setTimeout(() => setObjectOneStage(6), 100);
+                }
+              };
+              rafId = requestAnimationFrame(tick);
+            } else {
+              setStage6MoveT(0);
+            }
+
+            // 段階7の物体移動アニメ（1秒）→ 待機（1秒）→ 太棒移動アニメ（1秒）
+            if (objectOneStage === 6) {
+              const duration = 1000;
+              const start = performance.now();
+              setStage7MoveT(0);
+              setStage7RodMoveT(0);
+              const tick = (ts) => {
+                const elapsed = ts - start;
+                
+                if (elapsed < duration) {
+                  // 第1段階: 物体移動（0-1秒）
+                  const t = Math.min(1, elapsed / duration);
+                  setStage7MoveT(t);
+                  setStage7RodMoveT(0);
+                  rafId = requestAnimationFrame(tick);
+                } else if (elapsed >= duration && elapsed < duration * 2) {
+                  // 第2段階: 待機（1-2秒）
+                  setStage7MoveT(1);
+                  setStage7RodMoveT(0);
+                  rafId = requestAnimationFrame(tick);
+                } else if (elapsed >= duration * 2 && elapsed < duration * 3) {
+                  // 第3段階: 太棒移動（2-3秒）
+                  setStage7MoveT(1);
+                  const rodT = Math.min(1, (elapsed - duration * 2) / duration);
+                  setStage7RodMoveT(rodT);
+                  rafId = requestAnimationFrame(tick);
+                } else {
+                  // 段階7アニメーション完了（3秒後）したら段階8へ
+                  setStage7MoveT(1);
+                  setStage7RodMoveT(1);
+                  setTimeout(() => setObjectOneStage(7), 100);
+                }
+              };
+              rafId = requestAnimationFrame(tick);
+            } else {
+              setStage7MoveT(0);
+              setStage7RodMoveT(0);
+            }
+
+            // 段階8の処理（1秒移動→1秒待ち→3秒帯掛け待ち）
+            if (objectOneStage === 7) {
+              const start = performance.now();
+              setStage8StartTime(start); // 段階8開始時刻を記録
+              setStage8MoveT(0);
+              setShowBand(false); // 帯を非表示に
+              if (!stage8NotifiedRef.current) {
+                stage8NotifiedRef.current = true;
+                if (typeof onStage8Start === 'function') onStage8Start(id);
+              }
+
+                const tick = (ts) => {
+                  const elapsed = ts - start;
+
+                  if (elapsed < 1000) {
+                    // 0-1秒: 1秒かけて230移動
+                    const t = Math.min(1, elapsed / 1000);
+                  setStage8MoveT(t);
+                  // コの字キャッチャーも同期して移動
+                  setCocatchMoveT(t);
+                  rafId = requestAnimationFrame(tick);
+                  } else if (elapsed >= 1000 && elapsed < 2000) {
+                    // 1-2秒: 待機
+                  setStage8MoveT(1);
+                  setCocatchMoveT(1);
+                  rafId = requestAnimationFrame(tick);
+                  } else if (elapsed >= 2000 && elapsed < 5000) {
+                    // 2-5秒: 帯掛け表示して3秒待つ
+                  setStage8MoveT(1);
+                  setCocatchMoveT(1);
+                  if (elapsed >= 2000 && !showBand) {
+                    setShowBand(true); // 2秒経過時点で帯を表示
+                  }
+                  rafId = requestAnimationFrame(tick);
+                  } else if (elapsed >= 5000) {
+                    // 5秒経過したら段階9へ
+                  setStage8MoveT(1);
+                  setCocatchMoveT(1);
+                  setShowBand(true); // 帯は表示したまま
+                  setTimeout(() => setObjectOneStage(8), 100);
+                }
+              };
+              rafId = requestAnimationFrame(tick);
+            } else {
+              setStage8MoveT(0);
+              setCocatchMoveT(0);
+              }
+
+              // 段階9の物体移動アニメ（1秒補間）
+            if (objectOneStage === 8) {
+                const duration = 1000;
+                const start = performance.now();
+              setStage9MoveT(0);
+              // 段階9でも帯を表示し続ける
+              setShowBand(true);
+                const tick = (ts) => {
+                  const t = Math.min(1, (ts - start) / duration);
+                setStage9MoveT(t);
+                // コの字キャッチャーも同期して移動（排出位置まで）
+                // setCocatchMoveT(1 + t); // 帯掛け部(1) + 排出移動(t) - 復帰アニメーションと競合するため一時的に無効化
+                  if (t < 1) {
+                  rafId = requestAnimationFrame(tick);
+                  } else {
+                    // 段階9完了後、段階10へ
+                  setTimeout(() => setObjectOneStage(9), 100);
+                }
+              };
+              rafId = requestAnimationFrame(tick);
+            } else {
+              setStage9MoveT(0);
+              }
+
+              // 段階10の待機処理（2秒待機）
+            if (objectOneStage === 9) {
+                const duration = 2000;
+                const start = performance.now();
+              setStage10WaitT(0);
+              // 帯は表示し続ける
+              setShowBand(true);
+                const tick = (ts) => {
+                  const t = Math.min(1, (ts - start) / duration);
+                setStage10WaitT(t);
+                  if (t < 1) {
+                  rafId = requestAnimationFrame(tick);
+                  } else {
+                  // 段階10完了（物体は消える）
+                  setStage10WaitT(1);
+                  // この段階でセットが終了
+                  if (typeof onComplete === 'function') onComplete(id);
+                }
+              };
+              rafId = requestAnimationFrame(tick);
+            } else {
+              setStage10WaitT(0);
+            }
+            if (objectOneStage === 2 || objectOneStage === 3) {
+              setFutobouStage(1); // 段階3/3' → 状態②（64mm下）
+              
+            } else if (objectOneStage === 5) {
+              setFutobouStage(2); // 段階5(挿入後) → 状態③（164mm下）
+              
+            } else if (objectOneStage === 7) {
+              setFutobouStage(0); // 段階8 → 状態①（初期位置）（段階7で徐々に移動済み）
+              
+            }
+
+            // 細棒の状態切り替え
+            if (objectOneStage === 3) {
+              setHosobouStage(1); // 段階4 → 細棒状態1（通常色）
+              
+            } else if (objectOneStage === 4) {
+              setHosobouStage(2); // 段階5 → 細棒状態2（非表示）
+              
+              } else {
+              setHosobouStage(2); // それ以外 → 細棒状態2（背景色黄色）
+              
+            }
+            return () => { if (rafId) cancelAnimationFrame(rafId); };
+          }, [objectOneStage, isPaused]);
+
+          const scale = 1.0;
+          const [papers] = useState(() => 
+            Array.from({ length: 20 }).map((_, i) => ({
+              id: i,
+              status: 'slope'
+            }))
+          );
+
+          const handleReset = () => {
+            setFutobouStage(0);
+            setHosobouStage(2); // リセット時は細棒状態2
+            setShowBand(false); // 帯を非表示に
+            // コの字キャッチャーもリセット
+            setCocatchStage(0);
+            setCocatchUpperT(0);
+            setCocatchMoveT(0);
+            setCocatchApproachT(0);
+            setCocatchReturnT(0);
+            setCocatchLiftT(0);
+            setCocatchLiftStartTime(0);
+            setCocatchRightMoveT(0);
+            // 一度別の値にしてから0に戻すことで、useEffectを確実に発火させる
+            setObjectOneStage(-1);
+            setTimeout(() => {
+              setObjectOneStage(0);
+            }, 0);
+          };
+          
+          
+          // デバッグ用（未使用）
+          const handleObjectOneToggle = () => {
+            setObjectOneStage(prev => (prev + 1) % 11); // 0-10の11段階
+          };
+          
+          const viewHeight = 1200;
+          const machineHeight = 1000 * scale;
+          const beltOffset = 30 * scale;
+          const gapHeight = 40 * scale;
+          const stackHeight = machineHeight - beltOffset - gapHeight;
+          
+          const stack = {
+            x: 750,
+            w: 200 * scale,
+            sunokoY: viewHeight - stackHeight - 60 * scale + 200
+          };
+          
+          const productSize = { w: 150 * scale, h: 0.4 * scale };
+          
+          // 台紙関連のオフセット
+          const paperBlockOffsetX = -50;
+          const paperBlockOffsetY = -25;
+
+          // 台紙の厚み（直線の太さとして使用）
+          const paperStrokeWidth = productSize.h * 5;
+
+          // グリッドを描画する関数
+          const renderGrid = () => {
+            const gridElements = [];
+            const gridSpacing = 50;
+            const startX = 0;
+            const endX = 2000;
+            const startY = 0;
+            const endY = 1200;
+            
+            for (let x = startX; x <= endX; x += gridSpacing) {
+              gridElements.push(
+                <line
+                  key={`vgrid-${x}`}
+                  x1={x}
+                  y1={startY}
+                  x2={x}
+                  y2={endY}
+                  stroke="#e0e0e0"
+                  strokeWidth="1"
+                  strokeDasharray="5,5"
+                />
+              );
+              if (x % (gridSpacing * 2) === 0) {
+                gridElements.push(
+                  <text
+                    key={`xlabel-${x}`}
+                    x={x}
+                    y={20}
+                    textAnchor="middle"
+                    fontSize="16"
+                    fill="#666"
+                  >
+                    {x}
+                  </text>
+                );
+              }
+            }
+            
+            for (let y = startY; y <= endY; y += gridSpacing) {
+              gridElements.push(
+                <line
+                  key={`hgrid-${y}`}
+                  x1={startX}
+                  y1={y}
+                  x2={endX}
+                  y2={y}
+                  stroke="#e0e0e0"
+                  strokeWidth="1"
+                  strokeDasharray="5,5"
+                />
+              );
+              if (y % (gridSpacing * 2) === 0) {
+                gridElements.push(
+                  <text
+                    key={`ylabel-${y}`}
+                    x={20}
+                    y={y + 5}
+                    textAnchor="start"
+                    fontSize="16"
+                    fill="#666"
+                  >
+                    {y}
+                  </text>
+                );
+              }
+            }
+            
+            return gridElements;
+          };
+
+            // 段階8以降で製品の山（物体③）に縦帯をかける
+            const renderBandOnProduct = () => {
+              // 段階10で2秒待機完了後は非表示
+              if (objectOneStage === 9 && stage10WaitT >= 1) {
+                return null;
+              }
+              
+              // showBandフラグで表示制御
+              if (!showBand) {
+                return null;
+              }
+              
+              // 透明度は常に一定（セット切替時の見た目の揺らぎ防止）
+              const opacity = 1;
+
+            const width = 150;
+            const largeRadius = 12.5;
+
+            // 物体③の現在位置と上下面のYを算出（renderObjectThreeのロジックに追従）
+            let objX, obj1BottomY;
+            if (objectOneStage === 4) {
+              objX = stack.x + 10 * scale;
+              const futobouStage2OffsetY = 64;
+              const futobouTopY = stack.sunokoY + futobouStage2OffsetY - largeRadius;
+              obj1BottomY = futobouTopY;
+            } else if (objectOneStage === 5) {
+              objX = stack.x + 10 * scale;
+              const futobouStage3OffsetY = 164;
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+              obj1BottomY = futobouTopY;
+            } else if (objectOneStage === 6) {
+              objX = stack.x + 10 * scale + 330 * stage7MoveT; // 段階7でアニメーション適用
+              const futobouStage3OffsetY = 164;
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+              obj1BottomY = futobouTopY;
+            } else if (objectOneStage === 7) {
+              objX = stack.x + 10 * scale + 330 + 230 * stage8MoveT; // 段階8でアニメーション適用
+              const futobouStage3OffsetY = 164;
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+              obj1BottomY = futobouTopY;
+            } else if (objectOneStage === 8) {
+              objX = stack.x + 10 * scale + 560 + 280 * stage9MoveT; // 段階9でアニメーション適用
+              const futobouStage3OffsetY = 164;
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+              obj1BottomY = futobouTopY;
+            } else if (objectOneStage === 9) {
+              objX = stack.x + 10 * scale + 840;
+              const futobouStage3OffsetY = 164;
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius + 10;
+              obj1BottomY = futobouTopY;
+            }
+
+            // 物体③の頂面Y（renderObjectThreeに合わせる）
+            const isStage4Shape = objectOneStage === 4;
+            const topY = isStage4Shape ? obj1BottomY - 13 : obj1BottomY - 40;
+
+            // 下の台紙の位置（直線なので中心線のY座標）
+            const clearanceY = 1; // 物体①下の台紙に設定したクリアランス
+            const paperY = obj1BottomY + clearanceY;
+
+            const centerX = objX + width / 2;
+            const bandWidth = 20 * scale;
+            const bandX = centerX - bandWidth / 2;
+            const bandY = topY;
+            const bandH = Math.max(0, paperY - topY); // 上面から台紙までの高さ
+
+            return (
+              <rect
+                x={bandX}
+                y={bandY}
+                width={bandWidth}
+                height={bandH}
+                fill="#8B4513"
+                stroke="#5E2F0F"
+                strokeWidth="2"
+                opacity={0.85}
+                rx="2"
+                ry="2"
+              />
+            );
+          };
+
+          // 台紙を描画する関数（直線として描画）
+          const renderDaishi = () => {
+            // 常に描画（段階による非表示なし）
+            const paperWidth = 150 * scale;
+            const largeRadius = 12.5;
+            
+            if (objectOneStage === 0) {
+              // 段階1：アニメ完了時のみ静的に表示（それまでは補間ブロックで描画）
+              if (stage1PaperT < 1) return null;
+              const endX = stack.x + 10 * scale;
+              const endY = stack.sunokoY - largeRadius;
+              
+              // 台紙の左下基準座標（調整用）
+              const bottomLeftX = endX;
+              const bottomLeftY = endY;
+              
+              return (
+                <g>
+                  <line
+                    x1={endX}
+                    y1={endY}
+                    x2={endX + paperWidth}
+                    y2={endY}
+                    stroke="#FF8C00"
+                    strokeWidth={paperStrokeWidth}
+                    strokeLinecap="round"
+                    opacity={1}
+                  />
+                  {/* 台紙の左下基準座標表示 */}
+                  <text
+                    x={bottomLeftX - 5}
+                    y={bottomLeftY + 20}
+                    textAnchor="end"
+                    fontSize="12"
+                    fill="#000"
+                    fontWeight="bold"
+                  >
+                    ({Math.round(bottomLeftX)}, {Math.round(bottomLeftY)})
+                  </text>
+                </g>
+              );
+            } else if (objectOneStage >= 1) {
+              // 段階2以降：物体①の底辺に水平な台紙がくっつく
+              const width = 150;
+              
+              let objX, objBottomY;
+              
+              // 物体①の底辺の座標を取得
+              if (objectOneStage === 1) {
+                objX = stack.x + 10 * scale;
+                const futobouTopY = stack.sunokoY - largeRadius;
+                objBottomY = futobouTopY;
+              } else if (objectOneStage === 2) {
+                objX = stack.x + 10 * scale;
+                const futobouStage2OffsetY = 64 * stage3RodDropT; // 段階3でアニメーション適用
+                const futobouTopY = stack.sunokoY + futobouStage2OffsetY - largeRadius;
+                objBottomY = futobouTopY;
+              } else if (objectOneStage === 3) {
+                objX = stack.x + 10 * scale;
+                const futobouStage2OffsetY = 64;
+                const futobouTopY = stack.sunokoY + futobouStage2OffsetY - largeRadius;
+                objBottomY = futobouTopY;
+              } else if (objectOneStage === 4) {
+                objX = stack.x + 10 * scale;
+                const futobouStage2OffsetY = 64;
+                const futobouTopY = stack.sunokoY + futobouStage2OffsetY - largeRadius;
+                objBottomY = futobouTopY;
+            } else if (objectOneStage === 5) {
+              objX = stack.x + 10 * scale;
+              const futobouStage3OffsetY = 64 + (164 - 64) * stage6MoveT; // 段階6でアニメーション適用
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+              objBottomY = futobouTopY;
+              } else if (objectOneStage === 6) {
+                objX = stack.x + 10 * scale + 330 * stage7MoveT; // 段階7でアニメーション適用
+                const futobouStage3OffsetY = 164;
+                const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+                objBottomY = futobouTopY;
+              } else if (objectOneStage === 7) {
+                objX = stack.x + 10 * scale + 330 + 230 * stage8MoveT; // 段階8でアニメーション適用
+                const futobouStage3OffsetY = 164;
+                const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+                objBottomY = futobouTopY;
+              } else if (objectOneStage === 8) {
+                objX = stack.x + 10 * scale + 560 + 280 * stage9MoveT; // 段階9でアニメーション適用
+                const futobouStage3OffsetY = 164;
+                const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+                objBottomY = futobouTopY;
+              } else if (objectOneStage === 9) {
+                objX = stack.x + 10 * scale + 840;
+                const futobouStage3OffsetY = 164;
+                const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius + 10;
+                objBottomY = futobouTopY;
+              }
+              
+              // 水平な台紙を物体①の底辺に配置
+              const clearanceY = 1; // 物体①と重ならないためのクリアランス
+              const paperY = objBottomY + clearanceY;
+              
+              // 台紙の左下基準座標（調整用）
+              const bottomLeftX = objX;
+              const bottomLeftY = paperY;
+              
+              return (
+                <g>
+                  <line
+                    x1={objX}
+                    y1={paperY}
+                    x2={objX + paperWidth}
+                    y2={paperY}
+                    stroke="#FF8C00"
+                    strokeWidth={paperStrokeWidth}
+                    strokeLinecap="round"
+                    opacity={1}
+                  />
+                  {/* 台紙の左下基準座標表示 */}
+                  <text
+                    x={bottomLeftX - 5}
+                    y={bottomLeftY + 20}
+                    textAnchor="end"
+                    fontSize="12"
+                    fill="#000"
+                    fontWeight="bold"
+                  >
+                    ({Math.round(bottomLeftX)}, {Math.round(bottomLeftY)})
+                  </text>
+                </g>
+              );
+            }
+            
+            return null;
+          };
+
+          // 物体③を描画する関数
+          const renderObjectThree = () => {
+            // 常に描画（段階による非表示なし）
+            // 段階3以前では表示しない
+            if (objectOneStage <= 3) {
+              return null;
+            }
+            
+            const width = 150;
+            const largeRadius = 12.5;
+            
+            let objX, obj1BottomY;
+
+            if (objectOneStage === 4) {
+              objX = stack.x + 10 * scale;
+              const futobouStage2OffsetY = 64;
+              const futobouTopY = stack.sunokoY + futobouStage2OffsetY - largeRadius;
+              obj1BottomY = futobouTopY;
+            } else if (objectOneStage === 5) {
+              objX = stack.x + 10 * scale;
+              const futobouStage3OffsetY = 64 + (164 - 64) * stage6MoveT; // 段階6でアニメーション適用
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+              obj1BottomY = futobouTopY;
+            } else if (objectOneStage === 6) {
+              objX = stack.x + 10 * scale + 330 * stage7MoveT; // 段階7でアニメーション適用
+              const futobouStage3OffsetY = 164;
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+              obj1BottomY = futobouTopY;
+            } else if (objectOneStage === 7) {
+              objX = stack.x + 10 * scale + 330 + 230 * stage8MoveT; // 段階8でアニメーション適用
+              const futobouStage3OffsetY = 164;
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+              obj1BottomY = futobouTopY;
+            } else if (objectOneStage === 8) {
+              objX = stack.x + 10 * scale + 560 + 280 * stage9MoveT; // 段階9でアニメーション適用
+              const futobouStage3OffsetY = 164;
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+              obj1BottomY = futobouTopY;
+            } else if (objectOneStage === 9) {
+              objX = stack.x + 10 * scale + 840;
+              const futobouStage3OffsetY = 164;
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius + 10;
+              obj1BottomY = futobouTopY;
+            }
+            
+            let x1, y1, x2, y2, x3, y3, x4, y4;
+            
+            if (objectOneStage === 4) {
+              x1 = objX;
+              y1 = obj1BottomY - 13;
+              x2 = objX + width;
+              y2 = obj1BottomY - 27;
+              x3 = objX + width;
+              y3 = obj1BottomY - 27 - 13;
+              x4 = objX;
+              y4 = obj1BottomY - 13 - 27;
+            } else {
+              x1 = objX;
+              y1 = obj1BottomY - 13;
+              x2 = objX + width;
+              y2 = obj1BottomY - 27;
+              x3 = objX + width;
+              y3 = obj1BottomY - 40;
+              x4 = objX;
+              y4 = obj1BottomY - 40;
+            }
+            
+            // 物体③の左下基準座標（調整用）
+            const bottomLeftX = x1;
+            const bottomLeftY = y1;
+            
+            // 物体③本体
+            const objectThreePolygon = (
+              <polygon
+                points={`${x1},${y1} ${x2},${y2} ${x3},${y3} ${x4},${y4}`}
+                fill="#87CEEB"
+                stroke="#4682B4"
+                strokeWidth="2"
+                opacity={1}
+              />
+            );
+
+            // 段階5以降、物体③の上面に台紙を重ねて追従（直線として描画）
+            let overlayPaper = null;
+            if (objectOneStage >= 4) {
+              overlayPaper = (
+                <line
+                  x1={x4}
+                  y1={y4}
+                  x2={x3}
+                  y2={y3}
+                  stroke="#FF8C00"
+                  strokeWidth={paperStrokeWidth}
+                  strokeLinecap="round"
+                  opacity={1}
+                />
+              );
+            }
+
+            return (
+              <g>
+                {objectThreePolygon}
+                {overlayPaper}
+              </g>
+            );
+          };
+
+          // 物体②を描画する関数
+          const renderObjectTwo = () => {
+            // 段階10で2秒待機完了後は非表示
+            if (objectOneStage === 9 && stage10WaitT >= 1) {
+              return null;
+            }
+            
+            // 段階3では落下アニメーション中のみ、段階4では常に表示、段階5ではアニメーション完了直前に非表示
+            if (!(objectOneStage === 3 || (objectOneStage === 2 && stage3Object2DropT > 0) || (objectOneStage === 4 && stage5TransformT < 1))) {
+              return null;
+            }
+
+            const width = 150;
+            const smallRadius = 3;
+
+            // 段階4の物体②の形状
+            const stage4RightHeight = 13;
+            const stage4LeftHeight = 27;
+            // 段階5の物体③の形状
+            const stage5RightHeight = 40;
+            const stage5LeftHeight = 40;
+
+            // アニメーションで高さを補間（段階5で変形）
+            const rightHeight = objectOneStage === 4 ?
+              stage4RightHeight + (stage5RightHeight - stage4RightHeight) * stage5TransformT : stage4RightHeight;
+            const leftHeight = objectOneStage === 4 ?
+              stage4LeftHeight + (stage5LeftHeight - stage4LeftHeight) * stage5TransformT : stage4LeftHeight;
+            
+            const objX = stack.x + 10 * scale;
+            const hosobouTopY = stack.sunokoY - smallRadius;
+            const finalObjY = hosobouTopY;
+
+            // 段階5では太棒の上面に着地（段階3/4と同じ位置）
+            const largeRadius = 12.5;
+            const futobouOffsetY = 64; // 段階5ではfutobouStage = 1と同じ位置
+            const futobouTopY = stack.sunokoY + futobouOffsetY - largeRadius;
+
+            // 段階3では100mm上から落下アニメーション、段階5では太棒上面まで落下
+            let objY = finalObjY;
+            if (objectOneStage === 2) {
+              objY = finalObjY - 100 + 100 * stage3Object2DropT;
+            } else if (objectOneStage === 4) {
+              // 段階5で太棒の上面まで落下
+              objY = finalObjY + (futobouTopY - finalObjY) * stage5TransformT;
+            }
+            
+            const x1 = objX;
+            const y1 = objY;
+            const x2 = objX + width;
+            const y2 = objY;
+            const x3 = objX + width;
+            const y3 = objY - rightHeight;
+            const x4 = objX;
+            const y4 = objY - leftHeight;
+            
+            // 物体②の左下基準座標（調整用）
+            const bottomLeftX = x1;
+            const bottomLeftY = y1;
+            
+            // 物体②本体
+            const objectTwoPolygon = (
+              <polygon
+                points={`${x1},${y1} ${x2},${y2} ${x3},${y3} ${x4},${y4}`}
+                fill="#87CEEB"
+                stroke="#4682B4"
+                strokeWidth="2"
+                opacity="1"
+              />
+            );
+            
+            // 段階4ではアニメーション完了後に物体②の上辺に台紙を重ね、段階5では物体③の上辺に台紙を重ねる（直線として描画）
+            let overlayPaper = null;
+            if (objectOneStage === 3 && stage4PaperMoveT >= 1) {
+              // 段階4: 物体②の上面
+              overlayPaper = (
+                <line
+                  x1={x4}
+                  y1={y4}
+                  x2={x3}
+                  y2={y3}
+                  stroke="#FF8C00"
+                  strokeWidth={paperStrokeWidth}
+                  strokeLinecap="round"
+                  opacity="1"
+                />
+              );
+            } else if (objectOneStage === 4) {
+              // 段階5: 物体③の上面（常に表示、変形に追従）
+              overlayPaper = (
+                <line
+                  x1={x4}
+                  y1={y4}
+                  x2={x3}
+                  y2={y3}
+                  stroke="#FF8C00"
+                  strokeWidth={paperStrokeWidth}
+                  strokeLinecap="round"
+                  opacity="1"
+                />
+              );
+            }
+            
+            return (
+              <g>
+                {objectTwoPolygon}
+                {overlayPaper}
+              </g>
+            );
+          };
+
+          // 物体①を描画する関数
+          const renderObjectOne = () => {
+            // 段階1では物体を表示しない
+            if (objectOneStage === 0) {
+              return null;
+            }
+            // 常に描画（段階による非表示なし・透明度一定）
+            
+            const width = 150;
+            const rightHeight = 27;
+            const leftHeight = 13;
+            const largeRadius = 12.5;
+            
+            let objX, objY;
+            
+            if (objectOneStage === 1) {
+              objX = stack.x + 10 * scale;
+              const futobouTopY = stack.sunokoY - largeRadius;
+              const finalObjY = futobouTopY - paperStrokeWidth / 2;
+              const startObjY = finalObjY - 100; // 100mm上からスタート
+              objY = startObjY + (finalObjY - startObjY) * stage2ObjectDropT;
+            } else if (objectOneStage === 2) {
+              objX = stack.x + 10 * scale;
+              const futobouStage2OffsetY = 64 * stage3RodDropT; // 段階3でアニメーション適用
+              const futobouTopY = stack.sunokoY + futobouStage2OffsetY - largeRadius;
+              objY = futobouTopY - paperStrokeWidth / 2;
+            } else if (objectOneStage === 3) {
+              objX = stack.x + 10 * scale;
+              const futobouStage2OffsetY = 64;
+              const futobouTopY = stack.sunokoY + futobouStage2OffsetY - largeRadius;
+              objY = futobouTopY - paperStrokeWidth / 2;
+            } else if (objectOneStage === 4) {
+              objX = stack.x + 10 * scale;
+              const futobouStage2OffsetY = 64;
+              const futobouTopY = stack.sunokoY + futobouStage2OffsetY - largeRadius;
+              objY = futobouTopY - paperStrokeWidth / 2;
+            } else if (objectOneStage === 5) {
+              objX = stack.x + 10 * scale;
+              const futobouStage3OffsetY = 64 + (164 - 64) * stage6MoveT; // 段階6でアニメーション適用
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+              objY = futobouTopY - paperStrokeWidth / 2;
+            } else if (objectOneStage === 6) {
+              objX = stack.x + 10 * scale + 330 * stage7MoveT; // 段階7でアニメーション適用
+              const futobouStage3OffsetY = 164;
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+              objY = futobouTopY - paperStrokeWidth / 2;
+            } else if (objectOneStage === 7) {
+              objX = stack.x + 10 * scale + 330 + 230 * stage8MoveT; // 段階8でアニメーション適用
+              const futobouStage3OffsetY = 164;
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+              objY = futobouTopY - paperStrokeWidth / 2;
+            } else if (objectOneStage === 8) {
+              objX = stack.x + 10 * scale + 560 + 280 * stage9MoveT; // 段階9でアニメーション適用
+              const futobouStage3OffsetY = 164;
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius;
+              objY = futobouTopY - paperStrokeWidth / 2;
+            } else if (objectOneStage === 9) {
+              objX = stack.x + 10 * scale + 840;
+              const futobouStage3OffsetY = 164;
+              const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius + 10;
+              objY = futobouTopY - paperStrokeWidth / 2;
+            }
+            
+            const x1 = objX;
+            const y1 = objY;
+            const x2 = objX + width;
+            const y2 = objY;
+            const x3 = objX + width;
+            const y3 = objY - rightHeight;
+            const x4 = objX;
+            const y4 = objY - leftHeight;
+            
+            // 物体①の左下基準座標（調整用）
+            const bottomLeftX = x1;
+            const bottomLeftY = y1;
+            
+            return (
+              <polygon
+                points={`${x1},${y1} ${x2},${y2} ${x3},${y3} ${x4},${y4}`}
+                fill="#87CEEB"
+                stroke="#4682B4"
+                strokeWidth="2"
+                opacity={1}
+              />
+            );
+          };
+
+          // 新しい縦棒を描画する関数
+          const renderVerticalRod = () => {
+            const largeRadius = 12.5;
+            const rodWidth = 10; // 10mm
+            
+            // 一番左の太棒の左端のx位置
+            const leftmostFutobouCenterX = stack.x + largeRadius;
+            const leftmostFutobouLeftX = leftmostFutobouCenterX - largeRadius;
+            
+            // 新しい棒の右側面が太棒の左端に接する
+            const rodRightX = leftmostFutobouLeftX;
+            const rodLeftX = rodRightX - rodWidth;
+            
+            // y位置（下）：太棒が一番下まで下がるときの太棒の中点
+            const futobouStage2OffsetY = 164;
+            const rodBottomY = stack.sunokoY + futobouStage2OffsetY;
+            
+            // y位置（上）：三角ブロックの斜面との交点
+            const slopeX1 = stack.x - 150 * scale + paperBlockOffsetX;
+            const slopeY1 = stack.sunokoY - 30 * scale - 50 * scale - 70 * scale - 20 * scale + paperBlockOffsetY;
+            const slopeX2 = stack.x + paperBlockOffsetX;
+            const slopeY2 = stack.sunokoY - 30 * scale - 50 * scale - 20 * scale + paperBlockOffsetY;
+            
+            // 斜面の傾き
+            const slope = (slopeY2 - slopeY1) / (slopeX2 - slopeX1);
+            
+            // x = rodRightX での y を計算
+            const rodTopY = slopeY1 + slope * (rodRightX - slopeX1);
+            
+            return (
+              <rect
+                x={rodLeftX}
+                y={rodTopY}
+                width={rodWidth}
+                height={rodBottomY - rodTopY}
+                fill="#A0A0A0"
+                stroke="#808080"
+                strokeWidth="2"
+              />
+            );
+          };
+
+          // 斜めの棒を描画する関数（縦棒の上端から▽ブロックの右下まで）
+          const renderDiagonalRod = () => {
+            const largeRadius = 12.5;
+            const rodWidth = 10; // 10mm
+            
+            // 縦棒の情報
+            const leftmostFutobouCenterX = stack.x + largeRadius;
+            const leftmostFutobouLeftX = leftmostFutobouCenterX - largeRadius;
+            const rodRightX = leftmostFutobouLeftX;
+            
+            // 縦棒の上端Y座標
+            const slopeX1 = stack.x - 150 * scale + paperBlockOffsetX;
+            const slopeY1 = stack.sunokoY - 30 * scale - 50 * scale - 70 * scale - 20 * scale + paperBlockOffsetY;
+            const slopeX2 = stack.x + paperBlockOffsetX;
+            const slopeY2 = stack.sunokoY - 30 * scale - 50 * scale - 20 * scale + paperBlockOffsetY;
+            const slope = (slopeY2 - slopeY1) / (slopeX2 - slopeX1);
+            const rodTopY = slopeY1 + slope * (rodRightX - slopeX1);
+            
+            // 開始点：縦棒の上端（右側）
+            const startX = rodRightX;
+            const startY = rodTopY;
+            
+            // 終了点：▽ブロックの右下の点
+            const endX = slopeX2;
+            const endY = slopeY2;
+            
+            // 斜めの棒の方向ベクトル
+            const dx = endX - startX;
+            const dy = endY - startY;
+            const length = Math.sqrt(dx * dx + dy * dy);
+            
+            // 斜めの棒の垂直方向のオフセット（斜面の下側に配置）
+            const nx = dy / length;  // 右側（時計回り90度）の法線
+            const ny = -dx / length;
+            const offsetX = nx * rodWidth;
+            const offsetY = ny * rodWidth;
+            
+            // 四角形の4つの頂点（上面が斜面と一致）
+            const p1x = startX;
+            const p1y = startY;
+            const p2x = endX;
+            const p2y = endY;
+            const p3x = endX + offsetX;
+            const p3y = endY + offsetY;
+            const p4x = startX + offsetX;
+            const p4y = startY + offsetY;
+            
+            return (
+              <polygon
+                points={`${p1x},${p1y} ${p2x},${p2y} ${p3x},${p3y} ${p4x},${p4y}`}
+                fill="#A0A0A0"
+                stroke="#808080"
+                strokeWidth="2"
+              />
+            );
+          };
+
+          // 右側の縦棒を描画する関数（左右対称・20mm上・絶対位置）
+          const renderVerticalRodRight = () => {
+            const rodWidth = 10; // 10mm
+            const upOffset = 20; // 20mm上
+            
+            // 物体①の初期位置（段階2以降）の右側面の絶対位置
+            const objInitialRightX = stack.x + 10 * scale + 150;
+            
+            // 縦棒の左側面を物体①の右側面に接する
+            const rodLeftX = objInitialRightX;
+            const rodRightX = rodLeftX + rodWidth;
+            
+            // y位置（下）：細棒の位置まで
+            const rodBottomY = stack.sunokoY;
+            
+            // y位置（上）：元の縦棒と同じ高さから20mm上
+            const slopeX1 = stack.x - 150 * scale + paperBlockOffsetX;
+            const slopeY1 = stack.sunokoY - 30 * scale - 50 * scale - 70 * scale + paperBlockOffsetY;
+            const slopeX2 = stack.x + paperBlockOffsetX;
+            const slopeY2 = stack.sunokoY - 30 * scale - 50 * scale + paperBlockOffsetY;
+            
+            // 元の縦棒の左端（太棒の左端）
+            const largeRadius = 12.5;
+            const leftmostFutobouCenterX = stack.x + largeRadius;
+            const leftmostFutobouLeftX = leftmostFutobouCenterX - largeRadius;
+            const originalRodRightX = leftmostFutobouLeftX;
+            
+            // 斜面の傾き
+            const slope = (slopeY2 - slopeY1) / (slopeX2 - slopeX1);
+            const originalRodTopY = slopeY1 + slope * (originalRodRightX - slopeX1);
+            
+            // 複製の縦棒の上端を20mm上に
+            const rodTopY = originalRodTopY - upOffset;
+            
+            return (
+              <rect
+                x={rodLeftX}
+                y={rodTopY}
+                width={rodWidth}
+                height={rodBottomY - rodTopY}
+                fill="#A0A0A0"
+                stroke="#808080"
+                strokeWidth="2"
+              />
+            );
+          };
+
+          // 右側の斜めの棒を描画する関数（左右対称・20mm上・絶対位置）
+          const renderDiagonalRodRight = () => {
+            const rodWidth = 10; // 10mm
+            const upOffset = 20; // 20mm上
+            
+            // 物体①の初期位置（段階2以降）の右側面の絶対位置
+            const objInitialRightX = stack.x + 10 * scale + 150;
+            
+            // 元の斜め棒の情報を計算
+            const largeRadius = 12.5;
+            const leftmostFutobouCenterX = stack.x + largeRadius;
+            const leftmostFutobouLeftX = leftmostFutobouCenterX - largeRadius;
+            const originalRodRightX = leftmostFutobouLeftX;
+            
+            const slopeX1 = stack.x - 150 * scale + paperBlockOffsetX;
+            const slopeY1 = stack.sunokoY - 30 * scale - 50 * scale - 70 * scale + paperBlockOffsetY;
+            const slopeX2 = stack.x + paperBlockOffsetX;
+            const slopeY2 = stack.sunokoY - 30 * scale - 50 * scale + paperBlockOffsetY;
+            const slope = (slopeY2 - slopeY1) / (slopeX2 - slopeX1);
+            const originalRodTopY = slopeY1 + slope * (originalRodRightX - slopeX1);
+            
+            // 元の斜め棒の開始点と終了点
+            const originalStartX = originalRodRightX;
+            const originalStartY = originalRodTopY;
+            const originalEndX = slopeX2;
+            const originalEndY = slopeY2;
+            
+            // 左右対称：開始点（縦棒の上端・左側）と終了点を反転
+            // 開始点：縦棒の上端（左側）から開始
+            const startX = objInitialRightX;
+            const startY = originalStartY - upOffset;
+            
+            // 終了点：元の斜め棒の水平距離を右方向に
+            const originalHorizontalDist = originalEndX - originalStartX;
+            const endX = startX + originalHorizontalDist; // 右方向に同じ距離
+            const endY = originalEndY;
+            
+            // 斜めの棒の方向ベクトル
+            const dx = endX - startX;
+            const dy = endY - startY;
+            const length = Math.sqrt(dx * dx + dy * dy);
+            
+            // 斜めの棒の垂直方向のオフセット（左右対称なので法線を反転）
+            const nx = -dy / length;  // 左右反転：左側（反時計回り90度）の法線
+            const ny = dx / length;
+            const offsetX = nx * rodWidth;
+            const offsetY = ny * rodWidth;
+            
+            // 四角形の4つの頂点
+            const p1x = startX;
+            const p1y = startY;
+            const p2x = endX;
+            const p2y = endY;
+            const p3x = endX + offsetX;
+            const p3y = endY + offsetY;
+            const p4x = startX + offsetX;
+            const p4y = startY + offsetY;
+            
+            return (
+              <polygon
+                points={`${p1x},${p1y} ${p2x},${p2y} ${p3x},${p3y} ${p4x},${p4y}`}
+                fill="#A0A0A0"
+                stroke="#808080"
+                strokeWidth="2"
+              />
+            );
+          };
+
+          // すのこ棒に円を配置する関数
+          const renderSunokoCircles = () => {
+            const largeRadius = 12.5;
+            const smallRadius = 3;
+            const clearance = 2;
+            
+            let futobouOffsetY = 0;
+            const paperThickness = paperStrokeWidth; // 台紙一枚分の厚さ
+            if (futobouStage === 1) {
+              // 段階3ではアニメーションで徐々に下げる + 台紙一枚分
+              futobouOffsetY = objectOneStage === 2 ? 64 * stage3RodDropT + paperThickness : 64 + paperThickness;
+            } else if (futobouStage === 2) {
+              // 段階6ではアニメーションで徐々に下げる + 台紙一枚分
+              if (objectOneStage === 5) {
+                futobouOffsetY = 64 + (164 - 64) * stage6MoveT + paperThickness;
+              } else if (objectOneStage === 6) {
+                // 段階7では164mmから0mmに徐々に戻す + 台紙一枚分
+                futobouOffsetY = 164 * (1 - stage7RodMoveT) + paperThickness;
+              } else {
+                futobouOffsetY = 164 + paperThickness;
+              }
+            }
+            
+            const circles = [];
+            const adjustedLargeCount = 9;
+            const adjustedSmallCount = 8;
+            
+            const pattern = [];
+            for (let i = 0; i < adjustedLargeCount; i++) {
+              pattern.push({ type: 'large', radius: largeRadius });
+              if (i < adjustedSmallCount) {
+                pattern.push({ type: 'small', radius: smallRadius });
+              }
+            }
+            
+            let currentX = stack.x;
+            
+            // 太棒の左下基準座標（調整用）
+            const bottomLeftX = stack.x;
+            const bottomLeftY = stack.sunokoY + futobouOffsetY + largeRadius;
+            
+            pattern.forEach((item, index) => {
+              const cx = currentX + item.radius;
+              const baseCy = stack.sunokoY;
+              const cy = item.type === 'large' ? baseCy + futobouOffsetY : baseCy;
+              
+              if (item.type === 'large') {
+                circles.push(
+                  <circle
+                    key={`circle-large-${index}`}
+                    cx={cx}
+                    cy={cy}
+                    r={item.radius}
+                    fill="#FF6B6B"
+                    stroke="#CC5555"
+                    strokeWidth="2"
+                  />
+                );
+              } else {
+                // 細棒（小円）は状態に応じて描画スタイルを変更
+                if (hosobouStage === 1) {
+                  // 通常表示
+                  circles.push(
+                    <circle
+                      key={`circle-small-${index}`}
+                      cx={cx}
+                      cy={cy}
+                      r={item.radius}
+                      fill="#4ECDC4"
+                      stroke="#3BA39C"
+                      strokeWidth="1"
+                    />
+                  );
+                } else {
+                  // 非表示扱いのときは点線（輪郭のみ）で表示
+                  circles.push(
+                    <circle
+                      key={`circle-small-${index}`}
+                      cx={cx}
+                      cy={cy}
+                      r={item.radius}
+                      fill="none"
+                      stroke="#3BA39C"
+                      strokeWidth="1"
+                      strokeDasharray="2,3"
+                      opacity="0.7"
+                    />
+                  );
+                }
+              }
+              
+              currentX = cx + item.radius + clearance;
+            });
+            
+            // 太棒の座標表示を追加
+            circles.push(
+              <text
+                key="sunoko-coordinates"
+                x={bottomLeftX - 5}
+                y={bottomLeftY + 20}
+                textAnchor="end"
+                fontSize="12"
+                fill="#000"
+                fontWeight="bold"
+              >
+                ({Math.round(bottomLeftX)}, {Math.round(bottomLeftY)})
+              </text>
+            );
+            
+            return circles;
+          };
+
+          // プッシャー復帰アニメ用
+          const [pusherReturnT, setPusherReturnT] = useState(1);
+          const pusherReturnStartedRef = React.useRef(false);
+
+          // 段階7の330移動完了時に即リトラクト開始（0.5秒）
+          useEffect(() => {
+            let rafId;
+            
+            // 一時停止中はアニメーションを停止
+            if (isPaused) {
+              return () => { if (rafId) cancelAnimationFrame(rafId); };
+            }
+            
+            // 段階6(=ステージ7)に入ったら初期化
+            if (objectOneStage === 6 && !pusherReturnStartedRef.current && pusherReturnT !== 1) {
+              setPusherReturnT(1);
+            }
+            if (objectOneStage === 6 && stage7MoveT >= 1 && !pusherReturnStartedRef.current) {
+              const duration = 500;
+              const start = performance.now();
+              pusherReturnStartedRef.current = true;
+              setPusherReturnT(0);
+              const tick = (ts) => {
+                const t = Math.min(1, (ts - start) / duration);
+                setPusherReturnT(t);
+                if (t < 1) {
+                  rafId = requestAnimationFrame(tick);
+                }
+              };
+              rafId = requestAnimationFrame(tick);
+            }
+            if (objectOneStage <= 5) {
+              // 段階7前は常に待機完了状態
+              pusherReturnStartedRef.current = false;
+              setPusherReturnT(1);
+            }
+            if (objectOneStage >= 7) {
+              // 段階8以降も待機位置
+              pusherReturnStartedRef.current = true;
+              setPusherReturnT(1);
+            }
+            return () => { if (rafId) cancelAnimationFrame(rafId); };
+          }, [objectOneStage, stage7MoveT, isPaused]);
+
+          // プッシャー描画（待機/押し/復帰）
+          const renderPusher = () => {
+            // 共通定数
+            const width = 150;
+            const rightHeight = 27;
+            const leftHeight = 13;
+            const largeRadius = 12.5;
+
+            // 縦棒の左側で待機する位置（縦棒の左側面の更に左）
+            const rodWidth = 10;
+            const leftmostFutobouCenterX = stack.x + largeRadius;
+            const leftmostFutobouLeftX = leftmostFutobouCenterX - largeRadius; // 縦棒の右側面と一致
+            const rodRightX = leftmostFutobouLeftX;
+            const rodLeftX = rodRightX - rodWidth;
+
+            // 高さ基準（太棒が一番下にある時の基準で安定表示）
+            const futobouStage3OffsetY = 164;
+            const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius; // 太棒上面
+            const baseTopY = futobouTopY - paperStrokeWidth / 2;
+
+            // プッシャー寸法（高さを少し大きく）
+            const pusherWidth = 22;
+            const extraHeight = 10;
+
+            // 物体①の現在x/y（段階に応じて使用）
+            const objX_stage7 = stack.x + 10 * scale + 330 * stage7MoveT;
+            const objY_stage7 = baseTopY;
+
+            // 押し終わりの位置（物体①左側に密着）
+            const pushGap = 3;
+            const pushX = objX_stage7 - pusherWidth - pushGap;
+
+            // 待機位置（縦棒の左側）
+            const standbyGap = 8;
+            const standbyX = rodLeftX - standbyGap - pusherWidth;
+
+            // Yと高さ（物体①の高さに少し余裕を加える）
+            const topY = objY_stage7 - Math.max(rightHeight, leftHeight) - extraHeight;
+            const bottomY = objY_stage7 + extraHeight;
+            const pusherH = bottomY - topY;
+            // プッシャーの底辺を太棒の上面に一致させる
+            const pusherY = futobouTopY - pusherH;
+
+            // 描画対象ステージ: 常に表示（最新セットのみ）。
+            // - 段階6以前/段階8以降は待機位置
+            // - 段階7は押し位置
+            let x;
+            if (objectOneStage <= 5) {
+              x = standbyX;
+            } else if (objectOneStage === 6) {
+              // 段階7中: 330移動完了までは押し位置、その後に復帰アニメ
+              if (stage7MoveT < 1 && pusherReturnT === 1) {
+                x = pushX;
+              } else {
+                const lerp = (a, b, t) => a + (b - a) * t;
+                x = lerp(pushX, standbyX, pusherReturnT);
+              }
+            } else {
+              // 段階8以降
+              x = standbyX;
+            }
+
+            // プッシャーの可動距離（330px）
+            const pushDistance = 330;
+            const extendedLength = 60; // 60mm伸ばす
+            const outerCylinderLength = pushDistance - 30; // 30mm短く
+            const outerCylinderHeight = 14; // もう一回り太く（10→14）
+            
+            // 外筒は固定位置（待機位置）に配置
+            const outerCylinderX = standbyX - pushDistance;
+            
+            // テキストラベルの位置（外筒の上）
+            const labelX = outerCylinderX + (outerCylinderLength + extendedLength) / 2;
+            const labelY = pusherY + pusherH / 2 - outerCylinderHeight / 2 - 10;
+            
+            // プッシャーの左下基準座標（調整用）
+            const bottomLeftX = x;
+            const bottomLeftY = pusherY + pusherH;
+            
+            return (
+              <g>
+                {/* プッシャー本体 */}
+                <rect
+                  x={x}
+                  y={pusherY}
+                  width={pusherWidth}
+                  height={pusherH}
+                  fill="#9CA3AF"
+                  stroke="#6B7280"
+                  strokeWidth="2"
+                  rx="2"
+                  ry="2"
+                  opacity="0.95"
+                />
+                {/* 電動シリンダー内筒（細い棒、プッシャーと連動、60mm伸ばす） */}
+                <rect
+                  x={x - pushDistance - extendedLength}
+                  y={pusherY + pusherH / 2 - 3}
+                  width={pushDistance + extendedLength}
+                  height={6}
+                  fill="#7C7C7C"
+                  stroke="#5A5A5A"
+                  strokeWidth="1"
+                  rx="1"
+                  ry="1"
+                />
+                {/* 電動シリンダー外筒（太い棒、固定位置、60mm伸ばす、前面表示） */}
+                <rect
+                  x={outerCylinderX - extendedLength}
+                  y={pusherY + pusherH / 2 - outerCylinderHeight / 2}
+                  width={outerCylinderLength + extendedLength}
+                  height={outerCylinderHeight}
+                  fill="#A0A0A0"
+                  stroke="#808080"
+                  strokeWidth="1"
+                  rx="2"
+                  ry="2"
+                  opacity="1"
+                />
+                {/* 電動シリンダーラベル */}
+                <text
+                  x={labelX}
+                  y={labelY}
+                  textAnchor="middle"
+                  fontSize="20"
+                  fontWeight="bold"
+                  fill="#333"
+                >
+                  電動シリンダー
+                </text>
+                {/* プッシャーの左下基準座標表示 */}
+                <text
+                  x={bottomLeftX - 5}
+                  y={bottomLeftY + 20}
+                  textAnchor="end"
+                  fontSize="12"
+                  fill="#000"
+                  fontWeight="bold"
+                >
+                  ({Math.round(bottomLeftX)}, {Math.round(bottomLeftY)})
+                </text>
+              </g>
+            );
+          };
+
+          // 帯の位置表示（最新セットのみ表示）
+          const renderBandingPosition = () => {
+            const largeRadius = 12.5;
+            // 帯掛け位置（段階8の物体①位置）
+            const bandingX = stack.x + 10 * scale + 330 + 230; // 段階8の物体①位置
+            const bandingY = stack.sunokoY + 164 - largeRadius; // 太棒の上面位置
+            
+            // 帯の位置（物体③の上面から台紙までの範囲 + 上下100mm拡張）
+            const bandWidth = 20; // 帯の幅
+            const bandX = bandingX + 150 / 2 - bandWidth / 2; // 物体の中央
+            const bandTopY = bandingY - 40 - 100; // 物体③の上面 - 100mm上
+            const bandBottomY = bandingY + 1 + 100; // 台紙の位置 + 100mm下
+            const bandHeight = bandBottomY - bandTopY;
+            
+            // ラベルの位置（帯の上）
+            const labelX = bandX + bandWidth / 2;
+            const labelY = bandTopY - 10;
+            
+            return (
+              <g>
+                {/* 帯の位置の背景（透明な茶色） */}
+                <rect
+                  x={bandX}
+                  y={bandTopY}
+                  width={bandWidth}
+                  height={bandHeight}
+                  fill="#8B4513" // 茶色
+                  opacity="0.2"
+                />
+                {/* 帯の位置（茶色の点線、上下100mm拡張） */}
+                <rect
+                  x={bandX}
+                  y={bandTopY}
+                  width={bandWidth}
+                  height={bandHeight}
+                  fill="none"
+                  stroke="#8B4513" // 茶色
+                  strokeWidth="2"
+                  strokeDasharray="8,4"
+                  opacity="0.8"
+                />
+                {/* ラベル削除 */}
+              </g>
+            );
+          };
+
+          // コの字キャッチャーを描画する関数
+          const renderCocatch = () => {
+            // 段階6以降のセットのみ表示（ただし、id=1の場合は常に表示）
+            if (objectOneStage < 6 && id !== 1) {
+              return null;
+            }
+            
+            // キャッチャーの寸法
+            const rodHeight = 60; // 縦棒の高さ
+            const rodWidth = 60; // 横棒の幅
+            const rodThickness = 5; // 棒の厚さ
+            const upperLift = 10; // 上の横棒の待機時の上昇量
+            
+            // 金属板の寸法
+            const metalPlateWidth = 300; // 横300mm
+            const metalPlateHeight = 30; // 縦30mm
+            const metalPlate2Width = 20; // 2枚目：横20mm
+            const metalPlate2Height = 150; // 2枚目：縦150mm
+            
+            // セット停止位置（段階7完了位置）
+            const stopX = stack.x + 10 * scale + 330; // 330mm移動後
+            const stopY = stack.sunokoY + 164 - 12.5; // 太棒の上面位置
+            
+            // キャッチャーの基準位置（セットの右側面に縦棒の左側面が接触）
+            let baseX, baseY;
+            
+            if (objectOneStage <= 6) {
+              // 段階1-6：ベルトコンベア上で待機
+              baseX = stopX + 150; // セット停止位置の右側（ベルトコンベア上）
+              baseY = stopY;
+            } else if (objectOneStage === 8 && stage9MoveT >= 1) {
+              // 段階9完了後：右に100mm移動してからベルトコンベア上に戻る
+              const returnX = stopX + 150; // セット停止位置の右側（ベルトコンベア上）
+              const returnY = stopY;
+              // 段階9の最後の位置（排出位置）を計算
+              const currentX = stack.x + 10 * scale + 330 + 230 + 280 + 150; // 排出位置の右側
+              const currentY = stack.sunokoY + 164 - 12.5;
+              
+              // 右移動とベルトコンベア上への移動を組み合わせ
+              const rightMoveX = currentX + 100 * cocatchRightMoveT; // 右に100mm移動
+              const finalX = rightMoveX + (returnX - rightMoveX) * cocatchReturnT;
+              const finalY = currentY + (returnY - currentY) * cocatchReturnT;
+              
+              baseX = finalX;
+              baseY = finalY;
+            } else if (objectOneStage === 9) {
+              // 段階9：右移動とベルトコンベア上への移動
+              const returnX = stopX + 150; // セット停止位置の右側（ベルトコンベア上）
+              const returnY = stopY;
+              const currentX = stack.x + 10 * scale + 330 + 230 + 280 + 150; // 排出位置の右側
+              const currentY = stack.sunokoY + 164 - 12.5;
+              
+              // 右移動とベルトコンベア上への移動を組み合わせ
+              const rightMoveX = currentX + 100 * cocatchRightMoveT; // 右に100mm移動
+              const finalX = rightMoveX + (returnX - rightMoveX) * cocatchReturnT;
+              const finalY = currentY + (returnY - currentY) * cocatchReturnT;
+              
+              baseX = finalX;
+              baseY = finalY;
+            } else if (objectOneStage === 10) {
+              // 段階10：復帰完了後はベルトコンベア上で待機
+              baseX = stopX + 150; // セット停止位置の右側（ベルトコンベア上）
+              baseY = stopY;
+            } else {
+              // 段階7-8：セットと一緒に移動
+              let setX, setY;
+              
+              if (objectOneStage === 7) {
+                // 段階8：帯掛け部まで移動中
+                setX = stack.x + 10 * scale + 330 + 230 * stage8MoveT;
+                setY = stack.sunokoY + 164 - 12.5;
+              } else if (objectOneStage === 8) {
+                // 段階9：排出位置まで移動中
+                setX = stack.x + 10 * scale + 330 + 230 + 280 * stage9MoveT;
+                setY = stack.sunokoY + 164 - 12.5;
+              }
+              
+              // キャッチャーの位置（セットの右側面に縦棒の左側面が接触）
+              baseX = setX + 150; // セットの右端
+              baseY = setY;
+            }
+            
+            // 下の横棒の位置（ベルトコンベアの上面に合わせる）
+            const beltTopY = stack.sunokoY + 164 - 12.5 + paperStrokeWidth; // ベルトコンベアの上面
+            const lowerY = beltTopY; // 下の横棒の上面がベルトコンベアの上面と同じ位置
+            
+            // 上の横棒の位置（下の横棒の上面から上に60mm、さらに5mm下げる）
+            // cocatchLiftTに基づいてセットの上台紙の上面まで下げる
+            const normalUpperY = lowerY - rodHeight + 5; // 通常位置
+            const targetUpperY = baseY - 40 - rodThickness; // セットの上台紙の上面（物体③の上面）- 横棒の厚み分上に
+            const upperY = normalUpperY + (targetUpperY - normalUpperY) * cocatchLiftT;
+            
+            // 縦棒の位置（右側に配置、下の横棒の上面から上に伸びる、5mm下げる）
+            const verticalX = baseX;
+            const verticalY = lowerY - rodHeight + 5;
+            
+            // 金属板の位置（縦棒の右側面に左側面が接する）
+            const metalPlateX = verticalX + rodThickness; // 縦棒の右側面
+            const metalPlateY = lowerY - metalPlateHeight; // 下の横棒の上面から金属板の高さ分上
+            
+            // 2枚目の金属板の位置（1枚目の右上の角と2枚目の右下の角を合わせる）
+            const metalPlate2X = metalPlateX + metalPlateWidth - metalPlate2Width; // 右端を合わせる
+            const metalPlate2Y = metalPlateY - metalPlate2Height; // 1枚目の上端から2枚目の高さ分上
+            
+            // コの字キャッチャーの左下基準座標（調整用）
+            const bottomLeftX = baseX - rodWidth;
+            const bottomLeftY = lowerY + rodThickness;
+            
+            return (
+              <g>
+                {/* 下の横棒（左側） */}
+                <rect
+                  x={baseX - rodWidth}
+                  y={lowerY}
+                  width={rodWidth}
+                  height={rodThickness}
+                  fill="#C0C0C0"
+                  stroke="#808080"
+                  strokeWidth="1"
+                />
+                {/* 縦棒（右側） */}
+                <rect
+                  x={verticalX}
+                  y={verticalY}
+                  width={rodThickness}
+                  height={rodHeight}
+                  fill="#C0C0C0"
+                  stroke="#808080"
+                  strokeWidth="1"
+                />
+                {/* 上の横棒（左側） - 新しいセットが復帰開始したら古いセットは非表示 */}
+                {!shouldHideUpperBar && (
+                  <rect
+                    x={baseX - rodWidth}
+                    y={upperY}
+                    width={rodWidth}
+                    height={rodThickness}
+                    fill="#C0C0C0"
+                    stroke="#808080"
+                    strokeWidth="1"
+                  />
+                )}
+                {/* 金属板（縦棒の右側に追従） */}
+                <rect
+                  x={metalPlateX}
+                  y={metalPlateY}
+                  width={metalPlateWidth}
+                  height={metalPlateHeight}
+                  fill="#B0B0B0"
+                  stroke="#707070"
+                  strokeWidth="2"
+                  opacity="0.9"
+                />
+                {/* 2枚目の金属板（1枚目の右上に接続） */}
+                <rect
+                  x={metalPlate2X}
+                  y={metalPlate2Y}
+                  width={metalPlate2Width}
+                  height={metalPlate2Height}
+                  fill="#B0B0B0"
+                  stroke="#707070"
+                  strokeWidth="2"
+                  opacity="0.9"
+                />
+                {/* コの字キャッチャーの左下基準座標表示 */}
+                <text
+                  x={bottomLeftX - 5}
+                  y={bottomLeftY + 20}
+                  textAnchor="end"
+                  fontSize="12"
+                  fill="#000"
+                  fontWeight="bold"
+                >
+                  ({Math.round(bottomLeftX)}, {Math.round(bottomLeftY)})
+                </text>
+              </g>
+            );
+          };
+
+          // 固定位置の金属板を描画する関数（縦20mm×横600mm）
+          const renderFixedMetalPlate = () => {
+            const plateWidth = 630; // 左に30mm延長
+            const plateHeight = 20;
+            const plateX = 1520; // 右端据え置きで左に30mm延長（1550-30）
+            const plateY = 400; // 左上のy座標
+            const gap = 30; // 上に空けるギャップ
+            const plate2Height = plateHeight * 2; // 上の複製は縦2倍
+            const plate2Y = plateY - gap - plate2Height; // 下板の上から30mm離して配置
+            
+            return (
+              <g>
+                <rect
+                  x={plateX}
+                  y={plateY}
+                  width={plateWidth}
+                  height={plateHeight}
+                  fill="#B0B0B0"
+                  stroke="#707070"
+                  strokeWidth="2"
+                  opacity="0.9"
+                />
+                <rect
+                  x={plateX}
+                  y={plate2Y}
+                  width={plateWidth}
+                  height={plate2Height}
+                  fill="#B0B0B0"
+                  stroke="#707070"
+                  strokeWidth="2"
+                  opacity="0.9"
+                />
+                {/* 追加の金属板：右上が上板の左上(plateX, plate2Y)に一致し、下面が地面(y=1000) */}
+                {(() => {
+                  const extraWidth = 40; // 横40mm
+                  const extraRightX = plateX; // 右上xは上板の左上x
+                  const extraTopY = plate2Y; // 右上yは上板の左上y
+                  const extraX = extraRightX - extraWidth; // 左上x
+                  const extraY = extraTopY; // 左上y
+                  const groundY = 1000; // 地面のライン
+                  const extraHeight = Math.max(0, groundY - extraY);
+                  return (
+                    <rect
+                      x={extraX}
+                      y={extraY}
+                      width={extraWidth}
+                      height={extraHeight}
+                      fill="#B0B0B0"
+                      stroke="#707070"
+                      strokeWidth="2"
+                      opacity="0.9"
+                    />
+                  );
+                })()}
+                {/* もう一枚：左上が上板の右上(plateX+plateWidth, plate2Y)に一致。サイズは同じ（横40mm、下面は地面） */}
+                {(() => {
+                  const extraWidth = 40;
+                  const extraTopY = plate2Y;
+                  const groundY = 1000;
+                  const extraHeight = Math.max(0, groundY - extraTopY);
+                  const x = plateX + plateWidth; // 上板の右上x
+                  const y = extraTopY; // 上板の右上y
+                  return (
+                    <rect
+                      x={x}
+                      y={y}
+                      width={extraWidth}
+                      height={extraHeight}
+                      fill="#B0B0B0"
+                      stroke="#707070"
+                      strokeWidth="2"
+                      opacity="0.9"
+                    />
+                  );
+                })()}
+              </g>
+            );
+          };
+
+          // ベルトコンベア（最新セットのみ表示）
+          const renderBeltConveyor = () => {
+            const largeRadius = 12.5;
+            // 太棒の上面高さ（164mm下がった時）
+            const futobouStage3OffsetY = 164;
+            const futobouTopY = stack.sunokoY + futobouStage3OffsetY - largeRadius; // 太棒の上面
+            
+            // ベルトコンベアの寸法（トラック形状）
+            const beltHeight = largeRadius * 2; // 太棒の直径と同じ高さ
+            const beltY = futobouTopY + 5; // ベルトの上面を太棒の上面から5mm下げる
+            
+            // 左端：最右太棒の右側面（すのこ棒の実際の配置ロジックを使用）
+            const clearance = 2;
+            const adjustedLargeCount = 9;
+            const adjustedSmallCount = 8;
+            
+            const pattern = [];
+            for (let i = 0; i < adjustedLargeCount; i++) {
+              pattern.push({ type: 'large', radius: largeRadius });
+              if (i < adjustedSmallCount) {
+                pattern.push({ type: 'small', radius: 3 });
+              }
+            }
+            
+            let currentX = stack.x;
+            let rightmostFutobouRightX = 0;
+            
+            pattern.forEach((item, index) => {
+              const cx = currentX + item.radius;
+              if (item.type === 'large') {
+                rightmostFutobouRightX = cx + item.radius; // 太棒の右端
+              }
+              currentX = cx + item.radius + clearance;
+            });
+            
+            const beltLeftX = rightmostFutobouRightX;
+            
+            // 右端：帯掛け位置の左側面（段階8の物体①位置）
+            const bandingX = stack.x + 10 * scale + 330 + 230; // 段階8の物体①位置
+            const beltRightX = bandingX;
+            
+            const beltWidth = beltRightX - beltLeftX;
+            const centerY = beltY + beltHeight / 2;
+            
+            // ベルトコンベアの左下基準座標（調整用）
+            const bottomLeftX = beltLeftX;
+            const bottomLeftY = beltY + beltHeight;
+            
+            return (
+              <g>
+                {/* トラック形状のベルトコンベア（外側の輪郭、濃い緑のベース） */}
+                <path
+                  d={`M ${beltLeftX + largeRadius} ${centerY - largeRadius}
+                      L ${beltRightX - largeRadius} ${centerY - largeRadius}
+                      A ${largeRadius} ${largeRadius} 0 0 1 ${beltRightX} ${centerY}
+                      A ${largeRadius} ${largeRadius} 0 0 1 ${beltRightX - largeRadius} ${centerY + largeRadius}
+                      L ${beltLeftX + largeRadius} ${centerY + largeRadius}
+                      A ${largeRadius} ${largeRadius} 0 0 1 ${beltLeftX} ${centerY}
+                      A ${largeRadius} ${largeRadius} 0 0 1 ${beltLeftX + largeRadius} ${centerY - largeRadius}
+                      Z`}
+                  fill="none"
+                  stroke="#2E7D32" // 濃い緑
+                  strokeWidth="6"
+                />
+                {/* 動く線のパターン（明るい緑） */}
+                <path
+                  d={`M ${beltLeftX + largeRadius} ${centerY - largeRadius}
+                      L ${beltRightX - largeRadius} ${centerY - largeRadius}
+                      A ${largeRadius} ${largeRadius} 0 0 1 ${beltRightX} ${centerY}
+                      A ${largeRadius} ${largeRadius} 0 0 1 ${beltRightX - largeRadius} ${centerY + largeRadius}
+                      L ${beltLeftX + largeRadius} ${centerY + largeRadius}
+                      A ${largeRadius} ${largeRadius} 0 0 1 ${beltLeftX} ${centerY}
+                      A ${largeRadius} ${largeRadius} 0 0 1 ${beltLeftX + largeRadius} ${centerY - largeRadius}
+                      Z`}
+                  fill="none"
+                  stroke="#66BB6A" // 明るい緑
+                  strokeWidth="6"
+                  strokeDasharray="20 20"
+                  strokeDashoffset={beltDashOffset}
+                />
+                {/* 内部の空洞部分（透明） */}
+              <path
+                  d={`M ${beltLeftX + largeRadius} ${centerY - largeRadius + 2}
+                      L ${beltRightX - largeRadius} ${centerY - largeRadius + 2}
+                      A ${largeRadius - 2} ${largeRadius - 2} 0 0 1 ${beltRightX - 2} ${centerY}
+                      A ${largeRadius - 2} ${largeRadius - 2} 0 0 1 ${beltRightX - largeRadius} ${centerY + largeRadius - 2}
+                      L ${beltLeftX + largeRadius} ${centerY + largeRadius - 2}
+                      A ${largeRadius - 2} ${largeRadius - 2} 0 0 1 ${beltLeftX + 2} ${centerY}
+                      A ${largeRadius - 2} ${largeRadius - 2} 0 0 1 ${beltLeftX + largeRadius} ${centerY - largeRadius + 2}
+                      Z`}
+                  fill="transparent"
+                  stroke="none"
+                />
+                {/* ベルトコンベアの左下基準座標表示 */}
+                <text
+                  x={bottomLeftX - 5}
+                  y={bottomLeftY + 20}
+                  textAnchor="end"
+                  fontSize="12"
+                  fill="#000"
+                  fontWeight="bold"
+                >
+                  ({Math.round(bottomLeftX)}, {Math.round(bottomLeftY)})
+                </text>
+              </g>
+            );
+          };
+
+          return (
+            <svg width="2000" height="1200" viewBox="200 0 2000 1200" className="absolute inset-0">
+              {/* 背景や環境も各セット内で描画（簡易実装） */}
+              <rect x="0" y="0" width="2000" height="1200" fill="transparent" />
+              {/* 地面の線 (y=1000) */}
+              {showRod ? (
+                <line
+                  x1="0"
+                  y1="1000"
+                  x2="2200"
+                  y2="1000"
+                  stroke="#8B7355"
+                  strokeWidth="3"
+                  opacity="0.8"
+                />
+              ) : null}
+              {/* グリッド（最背面、最新セットのみ描画） */}
+              {showRod && showGrid ? renderGrid() : null}
+              {/* 緑ブロック（固定位置） */}
+              {showRod ? renderGreenBlock() : null}
+              {/* 固定位置の金属板 */}
+              {showRod ? renderFixedMetalPlate() : null}
+              {showRod ? renderVerticalRod() : null}
+              {showRod ? renderDiagonalRod() : null}
+              {showRod ? renderVerticalRodRight() : null}
+                {/* 台紙ブロック（黄色い三角形） */}
+                <polygon
+                  points={`
+                    ${stack.x - 150 * scale + paperBlockOffsetX},${stack.sunokoY - 30 * scale - 50 * scale - 70 * scale - 20 * scale + paperBlockOffsetY}
+                    ${stack.x - 150 * scale + paperBlockOffsetX},${stack.sunokoY - 30 * scale - 50 * scale - 20 * scale + paperBlockOffsetY}
+                    ${stack.x + paperBlockOffsetX},${stack.sunokoY - 30 * scale - 50 * scale - 20 * scale + paperBlockOffsetY}
+                  `}
+                  fill="#FFD700" stroke="#DAA520" strokeWidth="2"
+                />
+                <text x={stack.x - 75 * scale + paperBlockOffsetX} y={stack.sunokoY - 30 * scale - 50 * scale - 85 * scale - 20 * scale + paperBlockOffsetY} textAnchor="middle" fontSize="20" fontWeight="bold" fill="#333">台紙</text>
+                {(() => {
+                  const slopePapers = papers.filter(p => p.status === 'slope');
+                  if (slopePapers.length < 2) return null;
+                  const slopeLength = Math.sqrt(Math.pow(150 * scale, 2) + Math.pow(70 * scale, 2));
+                  const thicknessDx = (70 / slopeLength) * paperStrokeWidth;
+                  const thicknessDy = (-150 / slopeLength) * paperStrokeWidth;
+                  const firstIndex = papers.indexOf(slopePapers[0]);
+                  const lastIndex = papers.indexOf(slopePapers[slopePapers.length - 1]);
+                  const paper2Index = firstIndex + 1;
+                  const paper2X = stack.x + thicknessDx * paper2Index + paperBlockOffsetX;
+                  const paper2Y = stack.sunokoY - 30 * scale - 50 * scale - 20 * scale + thicknessDy * paper2Index + paperBlockOffsetY;
+                  const paperLastX = stack.x + thicknessDx * lastIndex + paperBlockOffsetX;
+                  const paperLastY = stack.sunokoY - 30 * scale - 50 * scale - 20 * scale + thicknessDy * lastIndex + paperBlockOffsetY;
+                  return (
+                  <line x1={paper2X} y1={paper2Y} x2={paperLastX} y2={paperLastY} stroke="#888888" strokeWidth="5" strokeLinecap="round" />
+                  );
+                })()}
+              <g>{showRod ? renderSunokoCircles() : null}</g>
+              {/* 段階7のプッシャー（最新セットのみ） */}
+              {showRod ? renderPusher() : null}
+              {/* ベルトコンベア（最新セットのみ表示） */}
+              {showRod ? renderBeltConveyor() : null}
+              {/* コの字キャッチャー（段階7以降のセットのみ） */}
+              {renderCocatch()}
+              {/* 帯の位置（最新セットのみ） */}
+              {showRod ? renderBandingPosition() : null}
+                {(() => {
+                  if (objectOneStage !== 0) return null;
+                  const paperWidth = 150 * scale;
+                  const slopeLength = Math.sqrt(Math.pow(150 * scale, 2) + Math.pow(70 * scale, 2));
+                  const thicknessDx = (70 / slopeLength) * paperStrokeWidth;
+                  const thicknessDy = (-150 / slopeLength) * paperStrokeWidth;
+                  const i = 0;
+                  const rightX = stack.x + thicknessDx * i + paperBlockOffsetX;
+                  const rightY = stack.sunokoY - 30 * scale - 50 * scale - 20 * scale + thicknessDy * i + paperBlockOffsetY;
+                  const leftX = rightX - 150 * scale;
+                  const leftY = rightY - 70 * scale;
+                  const largeRadius = 12.5;
+                  const rodRightX = stack.x + largeRadius - largeRadius;
+                  const slopeX1 = stack.x - 150 * scale + paperBlockOffsetX;
+                  const slopeY1 = stack.sunokoY - 30 * scale - 50 * scale - 70 * scale - 20 * scale + paperBlockOffsetY;
+                  const slopeX2 = stack.x + paperBlockOffsetX;
+                  const slopeY2 = stack.sunokoY - 30 * scale - 50 * scale - 20 * scale + paperBlockOffsetY;
+                  const slope = (slopeY2 - slopeY1) / (slopeX2 - slopeX1);
+                  const rodTopY = slopeY1 + slope * (rodRightX - slopeX1);
+                  const slideDx = rodRightX - leftX;
+                  const slideDy = rodTopY - leftY;
+                  const endX = stack.x + 10 * scale;
+                  const endY = stack.sunokoY - 12.5;
+                  const t = stage1PaperT;
+                  const lerp = (a, b, t) => a + (b - a) * t;
+                  let x1, y1, x2, y2;
+                  if (t < 0.6) {
+                    const t1 = t / 0.6;
+                    x1 = lerp(rightX, rightX + slideDx, t1);
+                    y1 = lerp(rightY, rightY + slideDy, t1);
+                    x2 = lerp(leftX, leftX + slideDx, t1);
+                    y2 = lerp(leftY, leftY + slideDy, t1);
+                  } else {
+                    const t2 = (t - 0.6) / 0.4;
+                    const midRightX = rightX + slideDx;
+                    const midRightY = rightY + slideDy;
+                    const midLeftX = leftX + slideDx;
+                    const midLeftY = leftY + slideDy;
+                    x1 = lerp(midRightX, endX + paperWidth, t2);
+                    y1 = lerp(midRightY, endY, t2);
+                    x2 = lerp(midLeftX, endX, t2);
+                    y2 = lerp(midLeftY, endY, t2);
+                  }
+                return (<line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#FF8C00" strokeWidth={paperStrokeWidth} strokeLinecap="round" opacity="1" />);
+                })()}
+                {(() => {
+                  const slopeLength = Math.sqrt(Math.pow(150 * scale, 2) + Math.pow(70 * scale, 2));
+                  const thicknessDx = (70 / slopeLength) * paperStrokeWidth;
+                  const thicknessDy = (-150 / slopeLength) * paperStrokeWidth;
+                  return papers.map((paper, i) => {
+                    if (paper.status === 'slope' && !(((objectOneStage === 0) && i === 0) || (objectOneStage >= 1 && i === 0))) {
+                      const baseX = stack.x + thicknessDx * i + paperBlockOffsetX;
+                      const baseY = stack.sunokoY - 30 * scale - 50 * scale - 20 * scale + thicknessDy * i + paperBlockOffsetY;
+                      const x1 = baseX;
+                      const y1 = baseY;
+                      const x2 = x1 - 150 * scale;
+                      const y2 = y1 - 70 * scale;
+                    return (<line key={`paper-${paper.id}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#FF8C00" strokeWidth={paperStrokeWidth} strokeLinecap="round" opacity="1" />);
+                    }
+                    return null;
+                  });
+                })()}
+                {renderDaishi()}
+                {(() => {
+                  if (objectOneStage !== 3) return null;
+                  const paperWidth = 150 * scale;
+                  const slopeLength = Math.sqrt(Math.pow(150 * scale, 2) + Math.pow(70 * scale, 2));
+                  const thicknessDx = (70 / slopeLength) * paperStrokeWidth;
+                  const thicknessDy = (-150 / slopeLength) * paperStrokeWidth;
+                  const i = 0;
+                  const startRightX = stack.x + thicknessDx * i + paperBlockOffsetX;
+                  const startRightY = stack.sunokoY - 30 * scale - 50 * scale - 20 * scale + thicknessDy * i + paperBlockOffsetY;
+                  const startLeftX = startRightX - 150 * scale;
+                  const startLeftY = startRightY - 70 * scale;
+                  const smallRadius = 3;
+                  const width = 150;
+                  const rightHeight = 13;
+                  const leftHeight = 27;
+                  const objX = stack.x + 10 * scale;
+                  const hosobouTopY = stack.sunokoY - smallRadius;
+                  const objY = hosobouTopY;
+                  const endLeftX = objX;
+                const endLeftY = objY - leftHeight;
+                  const endRightX = objX + width;
+                const endRightY = objY - rightHeight;
+                  const t = stage4PaperMoveT;
+                  const lerp = (a, b, t) => a + (b - a) * t;
+                  let x1, y1, x2, y2;
+                  if (t < 0.6) {
+                    const t1 = t / 0.6;
+                    const slopeX1 = stack.x - 150 * scale + paperBlockOffsetX;
+                    const slopeY1 = stack.sunokoY - 30 * scale - 50 * scale - 70 * scale - 20 * scale + paperBlockOffsetY;
+                    const slopeX2 = stack.x + paperBlockOffsetX;
+                    const slopeY2 = stack.sunokoY - 30 * scale - 50 * scale - 20 * scale + paperBlockOffsetY;
+                  const slideDx = 210 * scale;
+                  const slideDy = 98 * scale;
+                    x1 = lerp(startRightX, startRightX + slideDx, t1);
+                    y1 = lerp(startRightY, startRightY + slideDy, t1);
+                    x2 = lerp(startLeftX, startLeftX + slideDx, t1);
+                    y2 = lerp(startLeftY, startLeftY + slideDy, t1);
+                  } else {
+                    const t2 = (t - 0.6) / 0.4;
+                    const midRightX = startRightX + 210 * scale;
+                    const midRightY = startRightY + 98 * scale;
+                    const midLeftX = startLeftX + 210 * scale;
+                    const midLeftY = startLeftY + 98 * scale;
+                    x1 = lerp(midRightX, endRightX, t2);
+                    y1 = lerp(midRightY, endRightY, t2);
+                    x2 = lerp(midLeftX, endLeftX, t2);
+                    y2 = lerp(midLeftY, endLeftY, t2);
+                  }
+                return (<line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#FF8C00" strokeWidth={paperStrokeWidth} strokeLinecap="round" opacity="1" />);
+                })()}
+                {renderObjectTwo()}
+                {renderObjectOne()}
+                {renderObjectThree()}
+                {renderBandOnProduct()}
+              </svg>
+          );
+        };
+
+        // 親コンポーネント：複数セットのライフサイクル管理
+        const BeltConveyorAnimation = () => {
+          const [sets, setSets] = React.useState(() => [{ id: 1 }]);
+          const nextIdRef = React.useRef(2);
+          const [setsState, setSetsState] = React.useState({});
+          const [showGrid, setShowGrid] = React.useState(false); // グリッド表示フラグ
+          const [isPaused, setIsPaused] = React.useState(false); // アニメーション一時停止フラグ
+
+          const handleStage8Start = (id) => {
+            setSets(prev => {
+              // 最大同時稼働セット数を2に制限（1は禁止）
+              if (prev.length >= 2) return prev;
+              return [...prev, { id: nextIdRef.current++ }];
+            });
+          };
+
+          const handleComplete = (id) => {
+            setSets(prev => prev.filter(s => s.id !== id));
+            // セットが完了したら状態も削除
+            setSetsState(prev => {
+              const newState = { ...prev };
+              delete newState[id];
+              return newState;
+            });
+          };
+
+          const handleStageChange = React.useCallback((id, stage, returnT) => {
+            setSetsState(prev => ({
+              ...prev,
+              [id]: { stage, returnT }
+            }));
+          }, []);
+
+          const newestId = React.useMemo(() => (sets.length ? Math.max(...sets.map(s => s.id)) : null), [sets]);
+
+          // 最新セットが段階6以降（キャッチャー表示中）かチェック
+          const newestSet = setsState[newestId];
+          const newestShowingCatcher = newestSet && newestSet.stage >= 6;
+
+          // 一時停止ボタンのハンドラー
+          const handlePauseToggle = () => {
+            setIsPaused(prev => !prev);
+          };
+
+          return (
+            <div className="flex flex-col items-center gap-4 p-8 bg-gray-100 min-h-screen">
+              <div className="flex gap-4 mb-4">
+                <span className="px-4 py-2 rounded bg-gray-200 text-gray-700">稼働セット数: {sets.length}</span>
+                <button 
+                  onClick={() => setShowGrid(!showGrid)}
+                  className="px-4 py-2 rounded bg-blue-500 text-white hover:bg-blue-600"
+                >
+                  {showGrid ? 'グリッドを非表示' : 'グリッドを表示'}
+                </button>
+                <button 
+                  onClick={handlePauseToggle}
+                  className={`px-4 py-2 rounded text-white hover:opacity-80 ${
+                    isPaused ? 'bg-green-500' : 'bg-red-500'
+                  }`}
+                >
+                  {isPaused ? '再開' : '一時停止'}
+                </button>
+              </div>
+              <div className="relative">
+                <svg width="2000" height="1200" viewBox="200 0 2000 1200" className="border-2 border-gray-400 bg-white">
+                  {/* 背景の大きい長方形（全セットの背面） */}
+                  <rect x="1330" y="400" width="120" height="600" fill="#D0D0D0" stroke="#666" strokeWidth="2" />
+                  <rect x="350" y="350" width="850" height="650" fill="#D0D0D0" stroke="#666" strokeWidth="2" />
+                  {/* 右側の大きい四角形上にラベル */}
+                  <text x={1330 + 120 / 2} y={400 - 10} textAnchor="middle" fontSize="22" fontWeight="bold" fill="#8B4513">帯掛け機</text>
+                </svg>
+                {sets.map(s => (
+                  <SetRunner 
+                    key={s.id} 
+                    id={s.id} 
+                    onStage8Start={handleStage8Start} 
+                    onComplete={handleComplete} 
+                    showRod={s.id === newestId}
+                    shouldHideUpperBar={s.id !== newestId && newestShowingCatcher}
+                    onStageChange={handleStageChange}
+                    showGrid={showGrid}
+                    isPaused={isPaused}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        };
+
+        ReactDOM.render(<BeltConveyorAnimation />, document.getElementById('root'));
+    </script>
+</body>
+</html>
